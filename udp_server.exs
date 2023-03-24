@@ -41,13 +41,30 @@ defmodule UDPTunnel do
         IO.puts "Error, got a server and client argument, can only have one"
         {:stop, :normal, nil}
       is_tcp_server?(state) ->
-        {:ok, server_socket} = :gen_tcp.open(@udp_port, [active: true])
+        {:ok, listen_socket} = :gen_tcp.listen(@udp_port, [active: true])
+        {:ok, server_socket } = :gen_tcp.accept listen_socket
+
         {:ok, Map.put(state, :server_socket, server_socket)}
       is_tcp_client?(state) ->
-        {:ok, } - :gen_tcp.connect()
+#        {:ok, } - :gen_tcp.connect()
         {:ok, server_socket} = :gen_udp.open(@udp_port, [active: true])
         {:ok, Map.put(state, :server_socket, server_socket)}
     end
+  end
+
+  def handle_info({:tcp,socket,packet},state) do
+    IO.inspect packet, label: "incoming packet"
+    {:noreply, state}
+  end
+
+  def handle_info({:tcp_closed,socket},state) do
+    IO.inspect "Socket has been closed"
+    {:noreply, state}
+  end
+
+  def handle_info({:tcp_error,socket,reason},state) do
+    IO.inspect socket , label: "connection closed due to #{reason}"
+    {:noreply, state}
   end
 
   defp log(%{options: options}, message) do
