@@ -74,11 +74,10 @@ defmodule UDPTunnel do
   def handle_info({:tcp, socket, encoded_data}, state = %{downstream_socket: downstream_socket}) do
     data =
       encoded_data
-      |> to_string()
       |> Base.decode64!
 
     IO.inspect data, label: "incoming packet"
-    :gen_udp.send(downstream_socket, @localhost, @udp_port, data)
+    :gen_udp.send(downstream_socket, @localhost, @udp_port, to_string(data))
 
     {:noreply, state}
   end
