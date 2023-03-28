@@ -9,7 +9,7 @@ defmodule UDPTunnel do
   # Our module is going to use the DSL (Domain Specific Language) for Gen(eric) Servers
   use GenServer
 
-  @extra_udp_port 51820
+  @extra_udp_port 51822
   @udp_port 51820
   @tcp_port 51821
   @server_ip {192, 168, 88, 35}
@@ -47,7 +47,7 @@ defmodule UDPTunnel do
       is_tcp_server?(state) ->
         {:ok, socket} = :gen_tcp.listen(@tcp_port, [active: true])
         {:ok, server_socket} = :gen_tcp.accept socket
-        {:ok, downstream_socket} = :gen_udp.open(51822, [active: true])
+        {:ok, downstream_socket} = :gen_udp.open(@extra_udp_port, [active: true])
 
         state =
           state
@@ -78,7 +78,7 @@ defmodule UDPTunnel do
       |> Base.decode64!
 
     IO.inspect data, label: "incoming packet"
-    :gen_udp.send(downstream_socket, @localhost, @wireguard_port, data)
+    :gen_udp.send(downstream_socket, @localhost, @udp_port, data)
 
     {:noreply, state}
   end
