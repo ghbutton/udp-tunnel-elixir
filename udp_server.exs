@@ -9,8 +9,9 @@ defmodule UDPTunnel do
   # Our module is going to use the DSL (Domain Specific Language) for Gen(eric) Servers
   use GenServer
 
-  @wireguard_port 51820
-  @udp_port 51821
+  @extra_udp_port 51820
+  @udp_port 51820
+  @tcp_port 51821
   @server_ip {192, 168, 88, 35}
   @localhost {127, 0, 0, 1}
 
@@ -44,46 +45,51 @@ defmodule UDPTunnel do
         IO.puts "Error, got a server and client argument, can only have one"
         {:stop, :normal, nil}
       is_tcp_server?(state) ->
-        {:ok, listen_socket} = :gen_tcp.listen(@udp_port, [active: true])
-        {:ok, server_socket} = :gen_tcp.accept listen_socket
-        {:ok, udp_socket} = :gen_udp.open(51822)
+        {:ok, socket} = :gen_tcp.listen(@tcp_port, [active: true])
+        {:ok, server_socket} = :gen_tcp.accept socket
+        {:ok, downstream_socket} = :gen_udp.open(51822, [active: true])
 
         state =
           state
           |> Map.put(:server_socket, server_socket)
-          |> Map.put(:udp_socket, udp_socket)
+          |> Map.put(:downstream_socket, downstream_socket)
+
+        log(state, "TCP server and UDP client ready")
 
         {:ok, state}
       is_tcp_client?(state) ->
-        {:ok, client_socket} = :gen_tcp.connect(@server_ip, @udp_port, [])
-        {:ok, server_socket} = :gen_udp.open(@udp_port, [active: true])
+        {:ok, server_socket} = :gen_tcp.connect(@server_ip, @tcp_port, [])
+        {:ok, upstream_socket} = :gen_udp.open(@udp_port, [active: true])
+
         state =
           state
+          |> Map.put(:upstream_socket, upstream_socket)
           |> Map.put(:server_socket, server_socket)
-          |> Map.put(:client_socket, client_socket)
 
+        log(state, "UDP server and TCP client are ready")
         {:ok, state}
     end
   end
 
-  def handle_info({:tcp, socket, encoded_data}, state = %{udp_socket: udp_socket}) do
+  def handle_info({:tcp, socket, encoded_data}, state = %{downstream_socket: downstream_socket}) do
     data =
       encoded_data
       |> to_string()
       |> Base.decode64!
 
     IO.inspect data, label: "incoming packet"
-    :gen_udp.send(udp_socket, @localhost, @wireguard_port, data)
+    :gen_udp.send(downstream_socket, @localhost, @wireguard_port, data)
+
     {:noreply, state}
   end
 
   def handle_info({:tcp_closed, socket}, state) do
-    IO.inspect "Socket has been closed"
+    log(state, "Socket has been closed")
     {:noreply, state}
   end
 
   def handle_info({:tcp_error, socket, reason}, state) do
-    IO.inspect socket , label: "connection closed due to #{reason}"
+    IO.inspect socket, label: "connection closed due to #{reason}"
     {:noreply, state}
   end
 
@@ -101,7 +107,8 @@ defmodule UDPTunnel do
   end
 
   # define a callback handler for when gen_udp sends us a UDP packet
-  def handle_info({:udp, _socket, _address, _port, data}, state = %{server_socket: server_socket, client_socket: client_socket}) do
+  def handle_info({:udp, _socket, _address, _port, data}, state = %{upstream_socket: upstream_socket, server_socket: server_socket}) do
+    log(state, "Got data")
     # print the message
     encoded_data =
       data
@@ -109,7 +116,27 @@ defmodule UDPTunnel do
       |> Base.encode64
 
     IO.puts("Received: #{data}")
-    :ok = :gen_tcp.send(client_socket, encoded_data)
+    :ok = :gen_tcp.send(server_socket, encoded_data)
+
+    # IRL: do something more interesting...
+
+    # GenServer will understand this to mean "continue waiting for the next message"
+    # parameters:
+    # :noreply - no reply is needed
+    # new_state: keep the state as the current state
+    {:noreply, state}
+  end
+
+  def handle_info({:udp, _socket, _address, _port, data}, state = %{downstream_socket: downstream_socket, server_socket: server_socket}) do
+    log(state, "Got data")
+    # print the message
+    encoded_data =
+      data
+      |> to_string()
+      |> Base.encode64
+
+    IO.puts("Received: #{data}")
+    :ok = :gen_tcp.send(server_socket, encoded_data)
 
     # IRL: do something more interesting...
 
