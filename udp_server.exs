@@ -9,7 +9,10 @@ defmodule UDPTunnel do
   # Our module is going to use the DSL (Domain Specific Language) for Gen(eric) Servers
   use GenServer
 
+  @wireguard_port 51820
   @udp_port 51821
+  @server_ip {192, 168, 88, 35}
+  @localhost {127, 0, 0, 1}
 
   # We need a factory method to create our server process
   # it takes a single parameter `port` which defaults to `51820`
@@ -42,11 +45,17 @@ defmodule UDPTunnel do
         {:stop, :normal, nil}
       is_tcp_server?(state) ->
         {:ok, listen_socket} = :gen_tcp.listen(@udp_port, [active: true])
-        {:ok, server_socket } = :gen_tcp.accept listen_socket
+        {:ok, server_socket} = :gen_tcp.accept listen_socket
+        {:ok, udp_socket} = :gen_udp.open(51822)
 
-        {:ok, Map.put(state, :server_socket, server_socket)}
+        state =
+          state
+          |> Map.put(:server_socket, server_socket)
+          |> Map.put(:udp_socket, udp_socket)
+
+        {:ok, state}
       is_tcp_client?(state) ->
-        {:ok, client_socket} = :gen_tcp.connect({192, 168, 88, 35}, @udp_port, [])
+        {:ok, client_socket} = :gen_tcp.connect(@server_ip, @udp_port, [])
         {:ok, server_socket} = :gen_udp.open(@udp_port, [active: true])
         state =
           state
@@ -57,13 +66,14 @@ defmodule UDPTunnel do
     end
   end
 
-  def handle_info({:tcp, socket, encoded_data}, state) do
+  def handle_info({:tcp, socket, encoded_data}, state = %{udp_socket: udp_socket}) do
     data =
       encoded_data
       |> to_string()
       |> Base.decode64!
 
     IO.inspect data, label: "incoming packet"
+    :gen_udp.send(udp_socket, @localhost, @wireguard_port, data)
     {:noreply, state}
   end
 
