@@ -46,23 +46,33 @@ defmodule UDPTunnel do
 
         {:ok, Map.put(state, :server_socket, server_socket)}
       is_tcp_client?(state) ->
-#        {:ok, } - :gen_tcp.connect()
+        {:ok, client_socket} = :gen_tcp.connect({192, 168, 88, 35}, @udp_port, [])
         {:ok, server_socket} = :gen_udp.open(@udp_port, [active: true])
-        {:ok, Map.put(state, :server_socket, server_socket)}
+        state =
+          state
+          |> Map.put(:server_socket, server_socket)
+          |> Map.put(:client_socket, client_socket)
+
+        {:ok, state}
     end
   end
 
-  def handle_info({:tcp,socket,packet},state) do
-    IO.inspect packet, label: "incoming packet"
+  def handle_info({:tcp, socket, encoded_data}, state) do
+    data =
+      encoded_data
+      |> to_string()
+      |> Base.decode64!
+
+    IO.inspect data, label: "incoming packet"
     {:noreply, state}
   end
 
-  def handle_info({:tcp_closed,socket},state) do
+  def handle_info({:tcp_closed, socket}, state) do
     IO.inspect "Socket has been closed"
     {:noreply, state}
   end
 
-  def handle_info({:tcp_error,socket,reason},state) do
+  def handle_info({:tcp_error, socket, reason}, state) do
     IO.inspect socket , label: "connection closed due to #{reason}"
     {:noreply, state}
   end
@@ -81,13 +91,7 @@ defmodule UDPTunnel do
   end
 
   # define a callback handler for when gen_udp sends us a UDP packet
-  def handle_info({:udp, _socket, _address, _port, data}, state) do
-    # punt the data to a new function that will do pattern matching
-    handle_udp_packet(data, state)
-  end
-
-  # fallback pattern match to handle all other (non-"quit") messages
-  defp handle_udp_packet(data, state) do
+  def handle_info({:udp, _socket, _address, _port, data}, state = %{server_socket: server_socket, client_socket: client_socket}) do
     # print the message
     encoded_data =
       data
@@ -95,6 +99,7 @@ defmodule UDPTunnel do
       |> Base.encode64
 
     IO.puts("Received: #{data}")
+    :ok = :gen_tcp.send(client_socket, encoded_data)
 
     # IRL: do something more interesting...
 
